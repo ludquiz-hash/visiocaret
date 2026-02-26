@@ -1,464 +1,264 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { base44 } from '@/api/base44Client';
-import { resolveActiveGarageId } from '@/components/utils/garageUtils';
-import { isDevMode } from '@/components/utils/dev';
+import { useAuth } from '@/lib/AuthContext';
+import { claimsApi } from '@/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, AlertCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import GlassButton from '@/components/ui-custom/GlassButton';
 import GlassCard from '@/components/ui-custom/GlassCard';
 import StepIndicator from '@/components/ui-custom/StepIndicator';
-import StepIdentification from '@/components/wizard/StepIdentification';
-import StepPhotos from '@/components/wizard/StepPhotos';
-import StepAnalysis from '@/components/wizard/StepAnalysis';
-import StepRedaction from '@/components/wizard/StepRedaction';
-import StepPDF from '@/components/wizard/StepPDF';
-import PaywallModal from '@/components/layout/PaywallModal';
 import { toast } from 'sonner';
 
 const WIZARD_STEPS = [
   { id: 'identification', title: 'Identification', description: 'Client & véhicule' },
   { id: 'photos', title: 'Photos', description: 'Images du sinistre' },
-  { id: 'analysis', title: 'Analyse assistée', description: 'Saisie guidée des dégâts' },
-  { id: 'redaction', title: 'Rédaction', description: 'Ajustements' },
+  { id: 'analysis', title: 'Analyse', description: 'Description des dégâts' },
+  { id: 'redaction', title: 'Rédaction', description: 'Notes expert' },
   { id: 'pdf', title: 'Finalisation', description: 'Rapport PDF' },
 ];
+
+// Simple step components
+const StepIdentification = ({ data, onUpdate }) => (
+  <div className="space-y-4">
+    <h3 className="text-lg font-semibold text-white">Informations client</h3>
+    <div className="grid md:grid-cols-2 gap-4">
+      <input
+        type="text"
+        placeholder="Nom du client"
+        value={data.client_name || ''}
+        onChange={(e) => onUpdate({ client_name: e.target.value })}
+        className="px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30"
+      />
+      <input
+        type="email"
+        placeholder="Email"
+        value={data.client_email || ''}
+        onChange={(e) => onUpdate({ client_email: e.target.value })}
+        className="px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30"
+      />
+    </div>
+    <h3 className="text-lg font-semibold text-white mt-6">Véhicule</h3>
+    <div className="grid md:grid-cols-2 gap-4">
+      <input
+        type="text"
+        placeholder="Marque"
+        value={data.vehicle_brand || ''}
+        onChange={(e) => onUpdate({ vehicle_brand: e.target.value })}
+        className="px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30"
+      />
+      <input
+        type="text"
+        placeholder="Modèle"
+        value={data.vehicle_model || ''}
+        onChange={(e) => onUpdate({ vehicle_model: e.target.value })}
+        className="px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30"
+      />
+      <input
+        type="text"
+        placeholder="Immatriculation"
+        value={data.vehicle_license_plate || ''}
+        onChange={(e) => onUpdate({ vehicle_license_plate: e.target.value })}
+        className="px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30"
+      />
+      <input
+        type="text"
+        placeholder="Année"
+        value={data.vehicle_year || ''}
+        onChange={(e) => onUpdate({ vehicle_year: e.target.value })}
+        className="px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30"
+      />
+    </div>
+  </div>
+);
+
+const StepPhotos = ({ data, onUpdate }) => (
+  <div className="space-y-4">
+    <h3 className="text-lg font-semibold text-white">Photos du sinistre</h3>
+    <p className="text-white/50">Fonctionnalité de upload à implémenter</p>
+  </div>
+);
+
+const StepAnalysis = ({ data, onUpdate }) => (
+  <div className="space-y-4">
+    <h3 className="text-lg font-semibold text-white">Description des dommages</h3>
+    <textarea
+      placeholder="Décrivez les dommages observés..."
+      value={data.damage_description || ''}
+      onChange={(e) => onUpdate({ damage_description: e.target.value })}
+      rows={6}
+      className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30"
+    />
+  </div>
+);
+
+const StepRedaction = ({ data, onUpdate }) => (
+  <div className="space-y-4">
+    <h3 className="text-lg font-semibold text-white">Notes de l'expert</h3>
+    <textarea
+      placeholder="Vos observations et recommandations..."
+      value={data.expert_notes || ''}
+      onChange={(e) => onUpdate({ expert_notes: e.target.value })}
+      rows={6}
+      className="w-full px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30"
+    />
+    <div>
+      <label className="text-sm text-white/60 mb-2 block">Estimation réparation (€)</label>
+      <input
+        type="text"
+        placeholder="0.00"
+        value={data.estimated_repair_cost || ''}
+        onChange={(e) => onUpdate({ estimated_repair_cost: e.target.value })}
+        className="px-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30"
+      />
+    </div>
+  </div>
+);
+
+const StepPDF = ({ claimId }) => {
+  const navigate = useNavigate();
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleGeneratePDF = async () => {
+    setIsGenerating(true);
+    try {
+      const { blob } = await claimsApi.generatePDF(claimId);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rapport-${claimId}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('PDF généré avec succès !');
+    } catch (error) {
+      toast.error('Erreur lors de la génération du PDF');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="text-center space-y-6">
+      <div className="w-20 h-20 rounded-2xl bg-[#007AFF]/10 flex items-center justify-center mx-auto">
+        <span className="text-4xl">📄</span>
+      </div>
+      <h3 className="text-xl font-semibold text-white">Rapport prêt !</h3>
+      <p className="text-white/50">
+        Votre dossier est complet. Générez le rapport PDF final.
+      </p>
+      <GlassButton 
+        onClick={handleGeneratePDF}
+        disabled={isGenerating}
+      >
+        {isGenerating ? (
+          <>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Génération...
+          </>
+        ) : (
+          'Télécharger le PDF'
+        )}
+      </GlassButton>
+      <div>
+        <button 
+          onClick={() => navigate(createPageUrl('Claims'))}
+          className="text-[#007AFF] hover:underline"
+        >
+          Retour aux dossiers
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export default function ClaimWizard() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [currentStep, setCurrentStep] = useState(0);
   const [claimId, setClaimId] = useState(null);
   const [claimData, setClaimData] = useState({});
-  const [showPaywall, setShowPaywall] = useState(false);
 
   // Check if editing existing claim
   const urlParams = new URLSearchParams(window.location.search);
-  const editClaimId = urlParams.get('edit');
+  const editClaimId = urlParams.get('id');
 
-  // Get current user
-  const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me(),
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-  });
-
-  // Resolve active garage ID
-  const { data: activeGarageId } = useQuery({
-    queryKey: ['activeGarageId', user?.email],
-    queryFn: async () => {
-      if (!user) return null;
-      return await resolveActiveGarageId(user);
-    },
-    enabled: !!user,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-  });
-
-  // Get user's garage membership (for role checks)
-  const { data: membership } = useQuery({
-    queryKey: ['userMembership', user?.email],
-    queryFn: async () => {
-      if (!user?.email) return null;
-      const memberships = await base44.entities.GarageMember.filter({ user_email: user.email });
-      return memberships[0] || null;
-    },
-    enabled: !!user?.email,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-  });
-
-  // Get garage
-  const { data: garage } = useQuery({
-    queryKey: ['garage', activeGarageId],
-    queryFn: async () => {
-      if (!activeGarageId) return null;
-      const garages = await base44.entities.Garage.filter({ id: activeGarageId });
-      return garages[0] || null;
-    },
-    enabled: !!activeGarageId,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-  });
-
-  // Load existing claim if editing - MUST filter by id AND garage_id
+  // Load existing claim if editing
   const { data: existingClaim, isLoading: isLoadingClaim } = useQuery({
-    queryKey: ['claim', editClaimId, activeGarageId],
-    queryFn: async () => {
-      if (!editClaimId || !activeGarageId) return null;
-      
-      if (isDevMode()) {
-        console.debug('[ClaimWizard] Loading claim for edit:', { editClaimId, activeGarageId });
-      }
-      
-      // CRITICAL: Filter by both id AND garage_id for security
-      const claims = await base44.entities.Claim.filter({ 
-        id: editClaimId,
-        garage_id: activeGarageId 
-      });
-      
-      const loadedClaim = claims[0] || null;
-      
-      if (isDevMode()) {
-        console.debug('[ClaimWizard] Claim loaded for edit:', {
-          editClaimId,
-          activeGarageId,
-          claimGarageId: loadedClaim?.garage_id,
-          status: loadedClaim?.status,
-          found: !!loadedClaim
-        });
-      }
-      
-      return loadedClaim;
-    },
-    enabled: !!editClaimId && !!activeGarageId,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
+    queryKey: ['claim', editClaimId],
+    queryFn: () => claimsApi.get(editClaimId),
+    enabled: !!editClaimId && !!user,
   });
 
-  // Initialize claimId and claimData when editing
   useEffect(() => {
     if (existingClaim) {
-      // Security check: verify claim belongs to active garage
-      if (existingClaim.garage_id !== activeGarageId) {
-        toast.error('❌ Vous n\'avez pas l\'autorisation de modifier ce dossier');
-        navigate(createPageUrl('Claims'));
-        return;
-      }
-      
       setClaimId(existingClaim.id);
       setClaimData(existingClaim);
-      
-      if (isDevMode()) {
-        console.debug('[ClaimWizard] Claim initialized for edit:', {
-          claimId: existingClaim.id,
-          garageId: activeGarageId,
-          status: existingClaim.status
-        });
-      }
     }
-  }, [existingClaim, activeGarageId, navigate]);
+  }, [existingClaim]);
 
-  // Get usage counter
-  const now = new Date();
-  const { data: usageCounter } = useQuery({
-    queryKey: ['usageCounter', activeGarageId, now.getFullYear(), now.getMonth() + 1],
-    queryFn: async () => {
-      if (!activeGarageId) return { claims_created: 0 };
-      const counters = await base44.entities.UsageCounter.filter({
-        garage_id: activeGarageId,
-        year: now.getFullYear(),
-        month: now.getMonth() + 1
-      });
-      return counters[0] || { claims_created: 0 };
-    },
-    enabled: !!activeGarageId,
-    initialData: { claims_created: 0 },
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-  });
-
-  // Check limits - BLOQUER la création si limite atteinte
-  useEffect(() => {
-    if (garage && usageCounter && !editClaimId) { // Ne pas bloquer en mode édition
-      const claimsCreated = usageCounter.claims_created || 0;
-      const isTrialing = !garage.is_subscribed;
-      const trialEndsAt = garage.trial_ends_at ? new Date(garage.trial_ends_at) : null;
-      const isTrialExpired = isTrialing && trialEndsAt && trialEndsAt < new Date();
-      const isStarter = garage.is_subscribed && garage.plan_type === 'starter';
-      const hasReachedLimit = claimsCreated >= 15;
-
-      // Essai gratuit : limité à 15 dossiers + blocage si période expirée
-      if (isTrialing) {
-        if (isTrialExpired || hasReachedLimit) {
-          const reasonText = isTrialExpired
-            ? 'Période d\'essai terminée.'
-            : `Limite atteinte (${claimsCreated}/15 dossiers).`;
-
-          toast.error(
-            `${reasonText} Souscrivez au plan Starter (69€) ou Business (199€) pour continuer.`
-          );
-          setShowPaywall(true);
-          return;
-        }
-      }
-
-      // Plan Starter : 15 dossiers / mois
-      if (isStarter && hasReachedLimit) {
-        toast.error('Limite mensuelle atteinte (15 dossiers). Passez au plan Business pour un accès illimité.');
-        setShowPaywall(true);
-        return;
-      }
-    }
-  }, [garage, usageCounter, editClaimId]);
-
-  // Create/Update claim mutation
-  const saveClaim = useMutation({
-    mutationFn: async (data) => {
-      // CRITICAL: Block if no activeGarageId
-      if (!activeGarageId) {
-        throw new Error('Aucun garage actif. Veuillez rafraîchir la page.');
-      }
-
-      // SÉCURITÉ: Bloquer la création si limite atteinte
-      if (!claimId) { // Uniquement pour CREATE, pas UPDATE
-        const claimsCreated = usageCounter?.claims_created || 0;
-        const isTrialing = !garage?.is_subscribed;
-        const trialEndsAt = garage?.trial_ends_at ? new Date(garage.trial_ends_at) : null;
-        const isTrialExpired = isTrialing && trialEndsAt && trialEndsAt < new Date();
-        const isStarter = garage?.is_subscribed && garage?.plan_type === 'starter';
-        const hasReachedLimit = claimsCreated >= 15;
-
-        // Essai gratuit : max 15 dossiers + blocage si période expirée
-        if (isTrialing && (isTrialExpired || hasReachedLimit)) {
-          if (isTrialExpired) {
-            throw new Error('Période d\'essai terminée. Veuillez souscrire au plan Starter (69€) ou Business (199€).');
-          }
-          throw new Error('Limite de 15 dossiers atteinte pendant la période d\'essai. Passez à un plan payant pour continuer.');
-        }
-
-        // Plan Starter : 15 dossiers / mois
-        if (isStarter && hasReachedLimit) {
-          throw new Error('Limite mensuelle atteinte (15 dossiers). Passez au plan Business pour des dossiers illimités.');
-        }
-      }
-
+  // Create/update mutation
+  const saveMutation = useMutation({
+    mutationFn: async () => {
       if (claimId) {
-        // UPDATE existing claim
-        // CRITICAL: Verify claim belongs to active garage before update
-        let existing = existingClaim;
-        if (!existing || !existing.id) {
-          const claims = await base44.entities.Claim.filter({ 
-            id: claimId,
-            garage_id: activeGarageId 
-          });
-          existing = claims[0] || null;
-        }
-        
-        if (!existing || !existing.id) {
-          throw new Error('Dossier introuvable ou vous n\'avez pas l\'autorisation de le modifier');
-        }
-        
-        if (existing.garage_id !== activeGarageId) {
-          throw new Error('Vous n\'avez pas l\'autorisation de modifier ce dossier');
-        }
-
-        if (isDevMode()) {
-          console.debug('[ClaimWizard] Updating claim:', {
-            garageId: activeGarageId,
-            claimId: claimId,
-            claimGarageId: existing.garage_id,
-            status: existing.status,
-            action: 'update'
-          });
-        }
-
-        // Ensure garage_id is preserved in update data (required for RLS)
-        const updateData = {
-          ...(typeof data === 'object' && data !== null ? data : {}),
-          garage_id: activeGarageId
-        };
-
-        const updated = await base44.entities.Claim.update(claimId, updateData);
-        return updated;
+        return claimsApi.update(claimId, claimData);
       } else {
-        // CREATE new claim
-        const garageId = activeGarageId;
-
-        const reference = `CLM-${Date.now().toString(36).toUpperCase()}`;
-        const newClaim = await base44.entities.Claim.create({
-          ...(typeof data === 'object' && data !== null ? data : {}),
-          garage_id: garageId,
-          reference,
-          status: 'draft'
-        });
-        
-        // Update usage counter - only for CREATE, not UPDATE
-        const currentYear = now.getFullYear();
-        const currentMonth = now.getMonth() + 1;
-        if (usageCounter?.id) {
-          await base44.entities.UsageCounter.update(usageCounter.id, {
-            claims_created: (usageCounter.claims_created || 0) + 1
-          });
-        } else {
-          await base44.entities.UsageCounter.create({
-            garage_id: garageId,
-            year: currentYear,
-            month: currentMonth,
-            claims_created: 1
-          });
-        }
-        
-        return newClaim;
+        return claimsApi.create(claimData);
       }
     },
-    onSuccess: (data) => {
-      if (!claimId && data?.id) {
-        setClaimId(data.id);
+    onSuccess: (result) => {
+      if (!claimId && result?.id) {
+        setClaimId(result.id);
       }
-      
-      // Invalidate queries with proper keys including activeGarageId
-      queryClient.invalidateQueries({ queryKey: ['claims', activeGarageId] });
       queryClient.invalidateQueries({ queryKey: ['claims'] });
-      if (claimId || data?.id) {
-        const idToInvalidate = claimId || data.id;
-        // CRITICAL: Include activeGarageId in claim detail query key
-        queryClient.invalidateQueries({ queryKey: ['claim', idToInvalidate, activeGarageId] });
-        queryClient.invalidateQueries({ queryKey: ['claim', idToInvalidate] });
-      }
-      // CRITICAL: Invalidate usage counter with full key (year/month)
-      const now = new Date();
-      queryClient.invalidateQueries({ queryKey: ['usageCounter', activeGarageId, now.getFullYear(), now.getMonth() + 1] });
-      queryClient.invalidateQueries({ queryKey: ['usageCounter', activeGarageId] });
-      queryClient.invalidateQueries({ queryKey: ['usageCounter'] });
-      
-      // Show success toast
-      if (claimId) {
-        toast.success('Dossier modifié avec succès');
-      } else {
-        toast.success('Dossier créé avec succès');
-      }
-      
-      if (isDevMode()) {
-        console.debug('[ClaimWizard] Claim saved successfully:', {
-          claimId: data.id,
-          garageId: activeGarageId,
-          isUpdate: !!claimId
-        });
-      }
+      toast.success(claimId ? 'Dossier mis à jour' : 'Dossier créé');
     },
     onError: (error) => {
-      const errorMessage = error.message || error.toString() || 'Erreur lors de l\'enregistrement';
-      toast.error(`❌ ${errorMessage}`);
-      
-      if (isDevMode()) {
-        console.error('[ClaimWizard] Save error:', {
-          error,
-          message: error.message,
-          stack: error.stack,
-          garageId: activeGarageId,
-          claimId: claimId
-        });
-      }
+      toast.error(error.message || 'Erreur lors de la sauvegarde');
     }
   });
 
-  const handleStepComplete = async (stepData) => {
-    const newData = { ...claimData, ...stepData };
-    setClaimData(newData);
-
-    // Save to database
-    await saveClaim.mutateAsync(newData);
-
-    // Move to next step
+  const handleNext = async () => {
+    // Save current step
+    await saveMutation.mutateAsync();
+    
     if (currentStep < WIZARD_STEPS.length - 1) {
       setCurrentStep(currentStep + 1);
     }
   };
 
-  const handleBack = () => {
+  const handlePrevious = () => {
     if (currentStep > 0) {
       setCurrentStep(currentStep - 1);
     }
   };
 
-  const handleComplete = (pdfUrl) => {
-    // pdfUrl is optional, passed by StepPDF but not required
-    queryClient.invalidateQueries({ queryKey: ['claims', activeGarageId] });
-    if (claimId) {
-      // CRITICAL: Include activeGarageId in claim detail query key
-      queryClient.invalidateQueries({ queryKey: ['claim', claimId, activeGarageId] });
-      queryClient.invalidateQueries({ queryKey: ['claim', claimId] });
-    }
-    toast.success('Dossier finalisé avec succès !');
+  const updateClaimData = (newData) => {
+    setClaimData(prev => ({ ...prev, ...newData }));
   };
 
   const renderStep = () => {
     switch (currentStep) {
       case 0:
-        return (
-          <StepIdentification 
-            data={claimData} 
-            onNext={handleStepComplete} 
-          />
-        );
+        return <StepIdentification data={claimData} onUpdate={updateClaimData} />;
       case 1:
-        return (
-          <StepPhotos 
-            data={claimData} 
-            onNext={handleStepComplete}
-            onBack={handleBack}
-          />
-        );
+        return <StepPhotos data={claimData} onUpdate={updateClaimData} />;
       case 2:
-        return (
-          <StepAnalysis 
-            data={claimData} 
-            onNext={handleStepComplete}
-            onBack={handleBack}
-          />
-        );
+        return <StepAnalysis data={claimData} onUpdate={updateClaimData} />;
       case 3:
-        return (
-          <StepRedaction 
-            data={claimData} 
-            onNext={handleStepComplete}
-            onBack={handleBack}
-          />
-        );
+        return <StepRedaction data={claimData} onUpdate={updateClaimData} />;
       case 4:
-        return (
-          <StepPDF 
-            data={claimData}
-            claimId={claimId}
-            onBack={handleBack}
-            onComplete={handleComplete}
-          />
-        );
+        return <StepPDF claimId={claimId} />;
       default:
         return null;
     }
   };
 
-  // Calculate trial days
-  const getDaysRemaining = () => {
-    if (!garage?.trial_ends_at) return 5;
-    const trialEnd = new Date(garage.trial_ends_at);
-    const now = new Date();
-    const diffMs = trialEnd.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    return Math.max(0, diffDays);
-  };
-
-  // Show loading while resolving activeGarageId or loading existing claim
-  if (!activeGarageId || (editClaimId && isLoadingClaim)) {
+  if (isLoadingClaim) {
     return (
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="text-center py-12">
-          <Loader2 className="w-8 h-8 text-[#007AFF] animate-spin mx-auto mb-4" />
-          <p className="text-white/50 text-sm">Chargement...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Show error if editing but claim not found or doesn't belong to garage (only after loading finishes)
-  if (editClaimId && !isLoadingClaim && !existingClaim) {
-    return (
-      <div className="max-w-4xl mx-auto">
-        <GlassCard className="p-8 text-center">
-          <AlertCircle className="w-12 h-12 text-[#FF3B30] mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-white mb-2">Dossier introuvable</h2>
-          <p className="text-white/50 mb-6">
-            Le dossier demandé n'existe pas ou vous n'avez pas l'autorisation de le modifier.
-          </p>
-          <Link to={createPageUrl('Claims')}>
-            <GlassButton icon={null} className="">Retour aux dossiers</GlassButton>
-          </Link>
-        </GlassCard>
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-white" />
       </div>
     );
   }
@@ -466,38 +266,60 @@ export default function ClaimWizard() {
   return (
     <div className="max-w-4xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
-        <Link 
-          to={createPageUrl('Claims')}
-          className="inline-flex items-center gap-2 text-sm text-white/50 hover:text-white mb-4 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Retour aux dossiers
+      <div className="flex items-center gap-4 mb-8">
+        <Link to={createPageUrl('Claims')}>
+          <GlassButton variant="ghost" size="sm">
+            <ArrowLeft className="w-4 h-4" />
+          </GlassButton>
         </Link>
-        <h1 className="text-2xl md:text-3xl font-bold text-white">
-          {editClaimId ? 'Modifier le dossier' : 'Nouveau dossier d\'expertise'}
-        </h1>
-        <p className="text-white/50 mt-1">
-          {editClaimId ? 'Modifiez les informations du dossier' : 'Créez un rapport complet en quelques minutes'}
-        </p>
+        <div>
+          <h1 className="text-2xl font-bold text-white">
+            {editClaimId ? 'Modifier le dossier' : 'Nouveau dossier'}
+          </h1>
+          <p className="text-white/50 text-sm">
+            Étape {currentStep + 1} sur {WIZARD_STEPS.length}: {WIZARD_STEPS[currentStep].title}
+          </p>
+        </div>
       </div>
 
       {/* Step Indicator */}
-      <StepIndicator 
-        steps={WIZARD_STEPS} 
-        currentStep={currentStep} 
-        className="mb-8"
-      />
+      <StepIndicator steps={WIZARD_STEPS} currentStep={currentStep} />
 
       {/* Step Content */}
-      {renderStep()}
+      <GlassCard className="p-6 mb-6">
+        {renderStep()}
+      </GlassCard>
 
-      {/* Paywall */}
-      <PaywallModal 
-        isOpen={showPaywall}
-        daysRemaining={getDaysRemaining()}
-        onClose={!garage?.is_subscribed && getDaysRemaining() > 0 ? () => setShowPaywall(false) : undefined}
-      />
+      {/* Navigation */}
+      <div className="flex items-center justify-between">
+        <GlassButton
+          variant="secondary"
+          onClick={handlePrevious}
+          disabled={currentStep === 0}
+        >
+          Précédent
+        </GlassButton>
+
+        {currentStep < WIZARD_STEPS.length - 1 ? (
+          <GlassButton 
+            onClick={handleNext}
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Sauvegarde...
+              </>
+            ) : (
+              'Suivant'
+            )}
+          </GlassButton>
+        ) : (
+          <GlassButton onClick={() => navigate(createPageUrl('Claims'))}>
+            Terminer
+          </GlassButton>
+        )}
+      </div>
     </div>
   );
 }
