@@ -12,6 +12,23 @@ const mainPageKey = mainPage ?? Object.keys(Pages)[0];
 const MainPage = mainPageKey ? Pages[mainPageKey] : () => null;
 const LoginPage = Pages['Login'];
 
+// Extract page components
+const PricingPage = Pages['Pricing'];
+const PrivacyPage = Pages['Privacy'];
+const TermsPage = Pages['Terms'];
+const LegalPage = Pages['Legal'];
+const DashboardPage = Pages['Dashboard'];
+const ClaimsPage = Pages['Claims'];
+const ClaimDetailPage = Pages['ClaimDetail'];
+const ClaimWizardPage = Pages['ClaimWizard'];
+const TeamPage = Pages['Team'];
+const GarageSettingsPage = Pages['GarageSettings'];
+const SettingsPage = Pages['Settings'];
+const BillingPage = Pages['Billing'];
+const QAChecklistPage = Pages['QAChecklist'];
+const NativeTestPage = Pages['NativeTest'];
+const StripeTestPage = Pages['StripeTest'];
+
 const LayoutWrapper = ({ children }) => Layout ?
   <Layout>{children}</Layout>
   : <>{children}</>;
@@ -87,17 +104,17 @@ function App() {
                 </PublicRoute>
               } 
             />
-            <Route path="/Pricing" element={<Pages['Pricing'] />} />
-            <Route path="/Privacy" element={<Pages['Privacy'] />} />
-            <Route path="/Terms" element={<Pages['Terms'] />} />
-            <Route path="/Legal" element={<Pages['Legal']} />} />
+            <Route path="/Pricing" element={<PricingPage />} />
+            <Route path="/Privacy" element={<PrivacyPage />} />
+            <Route path="/Terms" element={<TermsPage />} />
+            <Route path="/Legal" element={<LegalPage />} />
 
             {/* Protected routes - require authentication */}
             <Route 
               path="/Dashboard" 
               element={
                 <ProtectedRoute>
-                  <Pages['Dashboard'] />
+                  <DashboardPage />
                 </ProtectedRoute>
               } 
             />
@@ -105,7 +122,7 @@ function App() {
               path="/Claims" 
               element={
                 <ProtectedRoute>
-                  <Pages['Claims'] />
+                  <ClaimsPage />
                 </ProtectedRoute>
               } 
             />
@@ -113,7 +130,7 @@ function App() {
               path="/ClaimDetail" 
               element={
                 <ProtectedRoute>
-                  <Pages['ClaimDetail'] />
+                  <ClaimDetailPage />
                 </ProtectedRoute>
               } 
             />
@@ -121,7 +138,7 @@ function App() {
               path="/ClaimWizard" 
               element={
                 <ProtectedRoute>
-                  <Pages['ClaimWizard'] />
+                  <ClaimWizardPage />
                 </ProtectedRoute>
               } 
             />
@@ -129,7 +146,7 @@ function App() {
               path="/Team" 
               element={
                 <ProtectedRoute>
-                  <Pages['Team'] />
+                  <TeamPage />
                 </ProtectedRoute>
               } 
             />
@@ -137,7 +154,7 @@ function App() {
               path="/GarageSettings" 
               element={
                 <ProtectedRoute>
-                  <Pages['GarageSettings'] />
+                  <GarageSettingsPage />
                 </ProtectedRoute>
               } 
             />
@@ -145,7 +162,7 @@ function App() {
               path="/Settings" 
               element={
                 <ProtectedRoute>
-                  <Pages['Settings'] />
+                  <SettingsPage />
                 </ProtectedRoute>
               } 
             />
@@ -153,7 +170,7 @@ function App() {
               path="/Billing" 
               element={
                 <ProtectedRoute>
-                  <Pages['Billing'] />
+                  <BillingPage />
                 </ProtectedRoute>
               } 
             />
@@ -161,7 +178,7 @@ function App() {
               path="/QAChecklist" 
               element={
                 <ProtectedRoute>
-                  <Pages['QAChecklist'] />
+                  <QAChecklistPage />
                 </ProtectedRoute>
               } 
             />
@@ -169,7 +186,7 @@ function App() {
               path="/NativeTest" 
               element={
                 <ProtectedRoute>
-                  <Pages['NativeTest'] />
+                  <NativeTestPage />
                 </ProtectedRoute>
               } 
             />
@@ -177,7 +194,7 @@ function App() {
               path="/StripeTest" 
               element={
                 <ProtectedRoute>
-                  <Pages['StripeTest'] />
+                  <StripeTestPage />
                 </ProtectedRoute>
               } 
             />
