@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { base44 } from '@/api/base44Client';
-import { resolveActiveGarageId } from '@/components/utils/garageUtils';
-import { isDevMode } from '@/components/utils/dev';
+import { useAuth } from '@/lib/AuthContext';
+import { claimsApi } from '@/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { 
@@ -54,193 +53,79 @@ import EditClaimModal from '@/components/claim/EditClaimModal';
 
 export default function Claims() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [deleteDialog, setDeleteDialog] = useState({ open: false, claim: null });
   const [editDialog, setEditDialog] = useState({ open: false, claim: null });
 
-  // Get user
-  const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me(),
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-  });
-
-  // Resolve active garage ID
-  const { data: activeGarageId } = useQuery({
-    queryKey: ['activeGarageId', user?.email],
-    queryFn: async () => {
-      if (!user) return null;
-      return await resolveActiveGarageId(user);
-    },
-    enabled: !!user,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-  });
-
   // Fetch claims
   const { data: claims = [], isLoading: loading } = useQuery({
-    queryKey: ['claims', activeGarageId],
-    queryFn: async () => {
-      if (!activeGarageId) return [];
-      return await base44.entities.Claim.filter(
-        { garage_id: activeGarageId },
-        '-created_date',
-        100
-      );
+    queryKey: ['claims'],
+    queryFn: () => claimsApi.list(),
+    enabled: !!user,
+  });
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id) => claimsApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['claims'] });
+      toast.success('Dossier supprimé');
+      setDeleteDialog({ open: false, claim: null });
     },
-    enabled: !!activeGarageId,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
+    onError: (error) => {
+      toast.error(error.message || 'Erreur lors de la suppression');
+    }
+  });
+
+  // Update mutation
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => claimsApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['claims'] });
+      toast.success('Dossier mis à jour');
+      setEditDialog({ open: false, claim: null });
+    },
+    onError: (error) => {
+      toast.error(error.message || 'Erreur lors de la mise à jour');
+    }
   });
 
   // Filter claims
   const filteredClaims = (claims || []).filter(claim => {
     const matchesSearch = !searchTerm || 
-      claim.vehicle_data?.brand?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      claim.vehicle_data?.model?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      claim.vehicle_data?.plate?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      claim.client_data?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      claim.reference?.toLowerCase().includes(searchTerm.toLowerCase());
+      (claim.claim_number?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (claim.client_name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (claim.vehicle_brand?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+      (claim.vehicle_model?.toLowerCase() || '').includes(searchTerm.toLowerCase());
     
     const matchesStatus = statusFilter === 'all' || claim.status === statusFilter;
     
     return matchesSearch && matchesStatus;
   });
 
-  // Stats
-  const stats = {
-    total: (claims || []).length,
-    draft: (claims || []).filter(c => c.status === 'draft').length,
-    analyzing: (claims || []).filter(c => c.status === 'analyzing').length,
-    completed: (claims || []).filter(c => c.status === 'completed').length,
+  const handleDelete = async () => {
+    if (deleteDialog.claim) {
+      deleteMutation.mutate(deleteDialog.claim.id);
+    }
   };
 
-  // Delete mutation
-  const deleteMutation = useMutation({
-    mutationFn: async (claim) => {
-      // CRITICAL: Block if no activeGarageId
-      if (!activeGarageId) {
-        throw new Error('Aucun garage actif. Veuillez rafraîchir la page.');
-      }
-
-      // CRITICAL: Verify claim belongs to active garage
-      if (claim.garage_id !== activeGarageId) {
-        throw new Error('Vous n\'avez pas l\'autorisation de supprimer ce dossier');
-      }
-
-      // CRITICAL: Only allow deleting drafts
-      if (claim.status !== 'draft') {
-        throw new Error('Seuls les brouillons peuvent être supprimés');
-      }
-
-      if (isDevMode()) {
-        console.debug('[Claims] Deleting claim:', {
-          garageId: activeGarageId,
-          claimId: claim.id,
-          claimGarageId: claim.garage_id,
-          status: claim.status,
-          action: 'delete'
-        });
-      }
-
-      await base44.entities.Claim.delete(claim.id);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['claims', activeGarageId] });
-      queryClient.invalidateQueries({ queryKey: ['claims'] });
-      toast.success('Dossier supprimé avec succès');
-      setDeleteDialog({ open: false, claim: null });
-    },
-    onError: (error) => {
-      const errorMessage = error.message || error.toString() || 'Erreur lors de la suppression';
-      toast.error(`❌ ${errorMessage}`);
-      
-      if (isDevMode()) {
-        console.error('[Claims] Delete error:', {
-          error,
-          message: error.message,
-          stack: error.stack,
-          garageId: activeGarageId
-        });
-      }
-    },
-  });
-
-  const handleDelete = (claim) => {
-    // Pre-check before showing dialog
-    if (!activeGarageId) {
-      toast.error('❌ Aucun garage actif. Veuillez rafraîchir la page.');
-      return;
+  const handleUpdate = async (data) => {
+    if (editDialog.claim) {
+      updateMutation.mutate({ id: editDialog.claim.id, data });
     }
-    if (claim.garage_id !== activeGarageId) {
-      toast.error('❌ Vous n\'avez pas l\'autorisation de supprimer ce dossier');
-      return;
-    }
-    if (claim.status !== 'draft') {
-      toast.error('❌ Seuls les brouillons peuvent être supprimés');
-      return;
-    }
-    setDeleteDialog({ open: true, claim });
   };
 
-  const handleEdit = (claim) => {
-    if (!activeGarageId) {
-      toast.error('❌ Aucun garage actif. Veuillez rafraîchir la page.');
-      return;
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'draft': return <FileText className="w-4 h-4 text-white/40" />;
+      case 'analyzing': return <Filter className="w-4 h-4 text-[#007AFF]" />;
+      case 'review': return <Eye className="w-4 h-4 text-[#FF9F0A]" />;
+      case 'completed': return <Calendar className="w-4 h-4 text-[#34C759]" />;
+      default: return <FileText className="w-4 h-4 text-white/40" />;
     }
-    if (claim.garage_id !== activeGarageId) {
-      toast.error('❌ Vous n\'avez pas l\'autorisation de modifier ce dossier');
-      return;
-    }
-    setEditDialog({ open: true, claim });
   };
-
-  // Update claim mutation
-  const updateMutation = useMutation({
-    mutationFn: async ({ claimId, data }) => {
-      if (!activeGarageId) {
-        throw new Error('Aucun garage actif. Veuillez rafraîchir la page.');
-      }
-
-      const claim = editDialog.claim;
-      if (!claim || claim.garage_id !== activeGarageId) {
-        throw new Error('Vous n\'avez pas l\'autorisation de modifier ce dossier');
-      }
-
-      if (isDevMode()) {
-        console.debug('[Claims] Updating claim:', {
-          garageId: activeGarageId,
-          claimId,
-          data
-        });
-      }
-
-      await base44.entities.Claim.update(claimId, { ...data, garage_id: activeGarageId });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['claims', activeGarageId] });
-      queryClient.invalidateQueries({ queryKey: ['claims'] });
-      toast.success('Dossier modifié avec succès');
-      setEditDialog({ open: false, claim: null });
-    },
-    onError: (error) => {
-      const errorMessage = error.message || error.toString() || 'Erreur lors de la modification';
-      toast.error(`❌ ${errorMessage}`);
-      
-      if (isDevMode()) {
-        console.error('[Claims] Update error:', {
-          error,
-          message: error.message,
-          stack: error.stack,
-          garageId: activeGarageId
-        });
-      }
-    },
-  });
-
-
 
   return (
     <div className="space-y-6">
@@ -249,244 +134,182 @@ export default function Claims() {
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-white">Dossiers</h1>
           <p className="text-white/50 mt-1">
-            {stats.total} dossier{stats.total > 1 ? 's' : ''} au total
+            {filteredClaims.length} dossier{filteredClaims.length > 1 ? 's' : ''}
           </p>
         </div>
         <Link to={createPageUrl('ClaimWizard')}>
-          <GlassButton icon={Plus} className="">
+          <GlassButton icon={Plus}>
             Nouveau dossier
           </GlassButton>
         </Link>
       </div>
 
-      {isDevMode() && (
-        <div className="text-xs bg-white/5 text-white/50 px-3 py-2 rounded-lg border border-white/10 space-y-1">
-          <div className="flex items-center gap-4 flex-wrap">
-            <span>🔍 DB claims: <strong className="text-white">{(claims || []).length}</strong></span>
-            <span>activeGarageId: <strong className={activeGarageId ? 'text-[#34C759]' : 'text-[#FF3B30]'}>{activeGarageId || 'null'}</strong></span>
-            <span>Filter: <strong className="text-white">{statusFilter}</strong></span>
-            <span>Search: <strong className="text-white">{searchTerm || 'none'}</strong></span>
-          </div>
-          {activeGarageId && (
-            <div className="text-[10px] text-white/40 font-mono">
-              Query: Claim.filter(garage_id={activeGarageId}, order=-created_date, limit=100)
-            </div>
-          )}
-        </div>
-      )}
-
-       {/* Quick Stats */}
-       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: 'Total', value: stats.total, color: 'text-white' },
-          { label: 'Brouillons', value: stats.draft, color: 'text-white/50' },
-          { label: 'En analyse', value: stats.analyzing, color: 'text-[#007AFF]' },
-          { label: 'Terminés', value: stats.completed, color: 'text-[#34C759]' },
-        ].map((stat, i) => (
-          <div 
-            key={i}
-            className="bg-white/[0.03] rounded-xl p-4 border border-white/[0.06]"
-          >
-            <p className="text-xs text-white/40 mb-1">{stat.label}</p>
-            <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
-          </div>
-        ))}
-      </div>
-
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex-1">
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
           <GlassInput
-            placeholder="Rechercher par véhicule, client, plaque..."
-            icon={Search}
+            placeholder="Rechercher un dossier..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
           />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-full sm:w-48 bg-white/[0.04] border-white/[0.08] text-white rounded-xl">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-white/40" />
-              <SelectValue placeholder="Statut" />
-            </div>
+          <SelectTrigger className="w-full sm:w-48 bg-white/[0.04] border-white/[0.08] text-white">
+            <Filter className="w-4 h-4 mr-2" />
+            <SelectValue placeholder="Statut" />
           </SelectTrigger>
-          <SelectContent className="bg-[#151921] border-white/10">
-            <SelectItem value="all" className="text-white hover:bg-white/10">Tous les statuts</SelectItem>
-            <SelectItem value="draft" className="text-white hover:bg-white/10">Brouillons</SelectItem>
-            <SelectItem value="analyzing" className="text-white hover:bg-white/10">En analyse</SelectItem>
-            <SelectItem value="review" className="text-white hover:bg-white/10">À vérifier</SelectItem>
-            <SelectItem value="completed" className="text-white hover:bg-white/10">Terminés</SelectItem>
+          <SelectContent className="bg-[#1a1d29] border-white/[0.08]">
+            <SelectItem value="all" className="text-white">Tous les statuts</SelectItem>
+            <SelectItem value="draft" className="text-white">Brouillon</SelectItem>
+            <SelectItem value="analyzing" className="text-white">En analyse</SelectItem>
+            <SelectItem value="review" className="text-white">En révision</SelectItem>
+            <SelectItem value="completed" className="text-white">Terminé</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       {/* Claims List */}
-      <GlassCard className="overflow-hidden">
-        {loading ? (
-          <div className="p-5 space-y-4">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="flex items-center gap-4">
-                <Skeleton className="h-14 w-14 rounded-xl bg-white/5" />
+      {loading ? (
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <GlassCard key={i} className="p-4">
+              <div className="flex items-center gap-4">
+                <Skeleton className="w-12 h-12 rounded-xl" />
                 <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-48 bg-white/5" />
-                  <Skeleton className="h-3 w-32 bg-white/5" />
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-32" />
                 </div>
-                <Skeleton className="h-6 w-24 rounded-full bg-white/5" />
               </div>
-            ))}
-          </div>
-        ) : filteredClaims.length === 0 ? (
-          <EmptyState
-            icon={FileText}
-            title={searchTerm || statusFilter !== 'all' ? "Aucun résultat" : "Aucun dossier"}
-            description={
-              searchTerm || statusFilter !== 'all'
-                ? "Modifiez vos critères de recherche"
-                : "Créez votre premier dossier d'expertise pour commencer"
-            }
-            action={!searchTerm && statusFilter === 'all' ? () => window.location.href = createPageUrl('ClaimWizard') : undefined}
-            actionLabel="Créer un dossier"
-            className=""
-          />
-        ) : (
-          <div className="divide-y divide-white/[0.06]">
-            {filteredClaims.map((claim) => {
-              const isDraft = claim.status === 'draft';
-              
-              return (
-                <div
-                  key={claim.id}
-                  className="flex items-center gap-4 p-4 hover:bg-white/[0.02] transition-colors group"
-                >
-                  {/* Vehicle Icon */}
-                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-[#007AFF]/20 to-[#007AFF]/5 flex items-center justify-center shrink-0 border border-[#007AFF]/20">
-                    <Car className="w-6 h-6 text-[#007AFF]" />
+            </GlassCard>
+          ))}
+        </div>
+      ) : filteredClaims.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="Aucun dossier"
+          description={searchTerm || statusFilter !== 'all' 
+            ? "Essayez de modifier vos filtres"
+            : "Créez votre premier dossier d'expertise"
+          }
+          action={
+            <Link to={createPageUrl('ClaimWizard')}>
+              <GlassButton icon={Plus}>
+                Créer un dossier
+              </GlassButton>
+            </Link>
+          }
+        />
+      ) : (
+        <div className="space-y-4">
+          {filteredClaims.map((claim) => (
+            <GlassCard key={claim.id} className="p-4 hover:border-white/[0.12] transition-colors">
+              <div className="flex items-start gap-4">
+                {/* Status Icon */}
+                <div className="w-12 h-12 rounded-xl bg-white/[0.04] flex items-center justify-center flex-shrink-0">
+                  {getStatusIcon(claim.status)}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div>
+                      <h3 className="font-semibold text-white truncate">
+                        {claim.claim_number || `Dossier #${claim.id?.slice(0, 8)}`}
+                      </h3>
+                      <p className="text-sm text-white/50">
+                        {claim.client_name || 'Client non renseigné'}
+                      </p>
+                    </div>
+                    <StatusBadge status={claim.status} />
                   </div>
 
-                  {/* Details */}
-                  <Link
-                    to={createPageUrl(`ClaimDetail?id=${claim.id}`)}
-                    className="flex-1 min-w-0"
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <p className="font-semibold text-white truncate">
-                        {claim.vehicle_data?.brand || 'Véhicule'} {claim.vehicle_data?.model || ''}
-                      </p>
-                      {claim.reference && (
-                        <span className="text-xs text-white/40 font-mono">#{claim.reference}</span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                      <span className="text-sm text-white/50">
-                        {claim.client_data?.name || 'Client non défini'}
-                      </span>
-                      {claim.vehicle_data?.plate && (
-                        <span className="text-xs text-white/40 font-mono bg-white/5 px-2 py-0.5 rounded">
-                          {claim.vehicle_data.plate}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1 text-xs text-white/30">
-                        <Calendar className="w-3 h-3" />
-                        {format(new Date(claim.created_date), 'dd MMM yyyy', { locale: fr })}
+                  <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-white/40">
+                    <div className="flex items-center gap-1.5">
+                      <Car className="w-4 h-4" />
+                      <span>
+                        {claim.vehicle_brand || 'N/A'} {claim.vehicle_model || ''}
                       </span>
                     </div>
-                  </Link>
-
-                  {/* Status */}
-                  <StatusBadge status={claim.status} className="" />
-
-                  {/* Actions Menu */}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button className="p-2 rounded-lg hover:bg-white/[0.08] transition-colors">
-                        <MoreVertical className="w-5 h-5 text-white/40" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="bg-[#151921] border-white/10">
-                      {isDraft ? (
-                        <>
-                          <DropdownMenuItem
-                            onClick={() => handleEdit(claim)}
-                            className="text-white hover:bg-white/10 cursor-pointer"
-                          >
-                            <Pencil className="w-4 h-4 mr-2" />
-                            Modifier (rapide)
-                          </DropdownMenuItem>
-                          <DropdownMenuItem asChild>
-                            <Link
-                              to={createPageUrl(`ClaimWizard?edit=${claim.id}`)}
-                              className="text-white hover:bg-white/10 cursor-pointer flex items-center"
-                            >
-                              <Pencil className="w-4 h-4 mr-2" />
-                              Modifier (complet)
-                            </Link>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleDelete(claim)}
-                            className="text-[#FF3B30] hover:bg-[#FF3B30]/10 cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4 mr-2" />
-                            Supprimer
-                          </DropdownMenuItem>
-                        </>
-                      ) : (
-                        <>
-                          <DropdownMenuItem
-                            onClick={() => handleEdit(claim)}
-                            className="text-white hover:bg-white/10 cursor-pointer"
-                          >
-                            <Pencil className="w-4 h-4 mr-2" />
-                            Modifier
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => window.location.href = createPageUrl(`ClaimDetail?id=${claim.id}`)}
-                            className="text-white hover:bg-white/10 cursor-pointer"
-                          >
-                            <Eye className="w-4 h-4 mr-2" />
-                            Voir détails
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="w-4 h-4" />
+                      <span>
+                        {claim.created_at 
+                          ? format(new Date(claim.created_at), 'dd MMM yyyy', { locale: fr })
+                          : 'Date inconnue'
+                        }
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </GlassCard>
 
-      {/* Delete Confirmation Dialog */}
+                {/* Actions */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="p-2 rounded-lg hover:bg-white/[0.04] transition-colors">
+                      <MoreVertical className="w-4 h-4 text-white/40" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="bg-[#1a1d29] border-white/[0.08]">
+                    <DropdownMenuItem 
+                      className="text-white hover:bg-white/[0.04]"
+                      onClick={() => window.location.href = createPageUrl(`ClaimDetail?id=${claim.id}`)}
+                    >
+                      <Eye className="w-4 h-4 mr-2" />
+                      Voir
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className="text-white hover:bg-white/[0.04]"
+                      onClick={() => setEditDialog({ open: true, claim })}
+                    >
+                      <Pencil className="w-4 h-4 mr-2" />
+                      Modifier
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      className="text-red-400 hover:bg-red-500/10"
+                      onClick={() => setDeleteDialog({ open: true, claim })}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Supprimer
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </GlassCard>
+          ))}
+        </div>
+      )}
+
+      {/* Delete Dialog */}
       <AlertDialog open={deleteDialog.open} onOpenChange={(open) => setDeleteDialog({ ...deleteDialog, open })}>
-        <AlertDialogContent className="bg-[#151921] border-white/10">
+        <AlertDialogContent className="bg-[#1a1d29] border-white/[0.08]">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-white">Supprimer le dossier ?</AlertDialogTitle>
-            <AlertDialogDescription className="text-white/60">
-              Cette action est irréversible. Le dossier brouillon "{deleteDialog.claim?.vehicle_data?.brand} {deleteDialog.claim?.vehicle_data?.model}" sera définitivement supprimé.
+            <AlertDialogTitle className="text-white">Confirmer la suppression</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/50">
+              Êtes-vous sûr de vouloir supprimer ce dossier ? Cette action est irréversible.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-white/[0.08] border-white/10 text-white hover:bg-white/[0.12]">
+            <AlertDialogCancel className="bg-white/[0.04] text-white border-white/[0.08] hover:bg-white/[0.08]">
               Annuler
             </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => deleteDialog.claim && deleteMutation.mutate(deleteDialog.claim)}
-              className="bg-[#FF3B30] hover:bg-[#FF3B30]/90 text-white"
-              disabled={deleteMutation.isPending}
+            <AlertDialogAction 
+              onClick={handleDelete}
+              className="bg-red-500 text-white hover:bg-red-600"
             >
-              {deleteMutation.isPending ? 'Suppression...' : 'Supprimer'}
+              Supprimer
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Edit Claim Modal */}
+      {/* Edit Dialog */}
       <EditClaimModal
+        claim={editDialog.claim}
         open={editDialog.open}
         onOpenChange={(open) => setEditDialog({ ...editDialog, open })}
-        claim={editDialog.claim}
-        onSave={(data) => editDialog.claim && updateMutation.mutate({ claimId: editDialog.claim.id, data })}
-        isSaving={updateMutation.isPending}
+        onSave={handleUpdate}
       />
     </div>
   );

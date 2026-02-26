@@ -1,8 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { base44 } from '@/api/base44Client';
-import { resolveActiveGarageId } from '@/components/utils/garageUtils';
+import { useAuth } from '@/lib/AuthContext';
+import { claimsApi, garageApi } from '@/api';
 import { useQuery } from '@tanstack/react-query';
 import { 
   FileText, 
@@ -24,37 +24,21 @@ import EmptyState from '@/components/ui-custom/EmptyState';
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Dashboard() {
-  // Get user
-  const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me(),
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-  });
-
-  // Resolve active garage ID
-  const { data: activeGarageId } = useQuery({
-    queryKey: ['activeGarageId', user?.email],
-    queryFn: async () => {
-      if (!user) return null;
-      return await resolveActiveGarageId(user);
-    },
-    enabled: !!user,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
-  });
+  // Get user from auth context
+  const { user, profile } = useAuth();
 
   // Fetch garage
   const { data: garage } = useQuery({
-    queryKey: ['garage', activeGarageId],
-    queryFn: async () => {
-      if (!activeGarageId) return null;
-      const garages = await base44.entities.Garage.filter({ id: activeGarageId });
-      return garages[0] || null;
-    },
-    enabled: !!activeGarageId,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
+    queryKey: ['garage'],
+    queryFn: () => garageApi.get(),
+    enabled: !!user,
+  });
+
+  // Fetch claims
+  const { data: claims } = useQuery({
+    queryKey: ['claims'],
+    queryFn: () => claimsApi.list({ limit: 5 }),
+    enabled: !!user,
   });
 
   // Fetch claims
@@ -73,39 +57,30 @@ export default function Dashboard() {
     refetchOnWindowFocus: true,
   });
 
-  // Fetch usage counter
-  const now = new Date();
-  const { data: usageCounter = { claims_created: 0 } } = useQuery({
-    queryKey: ['usageCounter', activeGarageId, now.getFullYear(), now.getMonth() + 1],
-    queryFn: async () => {
-      if (!activeGarageId) return { claims_created: 0 };
-      const counters = await base44.entities.UsageCounter.filter({
-        garage_id: activeGarageId,
-        year: now.getFullYear(),
-        month: now.getMonth() + 1
-      });
-      return counters[0] || { claims_created: 0 };
-    },
-    enabled: !!activeGarageId,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
+  // Fetch usage
+  const { data: usage = { claims_created: 0 } } = useQuery({
+    queryKey: ['usage'],
+    queryFn: () => garageApi.getUsage(),
+    enabled: !!user,
   });
 
+  const claimsList = claims || [];
+
   // Calculate stats
-  const activeClaims = claims.filter(c => ['draft', 'analyzing', 'review'].includes(c.status));
-  const completedClaims = claims.filter(c => c.status === 'completed');
+  const activeClaims = claimsList.filter(c => ['draft', 'analyzing', 'review'].includes(c.status));
+  const completedClaims = claimsList.filter(c => c.status === 'completed');
   const totalHoursSaved = completedClaims.reduce((acc, c) => {
     const hours = c.ai_report?.total_hours || 0;
     return acc + (hours * 0.3); // Assume 30% time saved per analysis
   }, 0);
 
-  const recentClaims = claims.slice(0, 5);
+  const recentClaims = claimsList.slice(0, 5);
 
   return (
     <div className="space-y-8">
       {process.env.NODE_ENV === 'development' && (
         <div className="text-xs bg-white/5 text-white/50 px-3 py-2 rounded-lg border border-white/10">
-          🔍 DB claims count: {(claims || []).length} | activeGarageId: {activeGarageId || 'null'}
+          🔍 DB claims count: {(claimsList || []).length} | activeGarageId: {activeGarageId || 'null'}
         </div>
       )}
       
@@ -137,7 +112,7 @@ export default function Dashboard() {
         />
         <StatCard
           title="Ce mois"
-          value={usageCounter?.claims_created || 0}
+          value={usage?.claims_created || 0}
           icon={Calendar}
           color="purple"
           subtitle={garage?.plan_type === 'starter' ? `/ 15 max` : 'Illimité'}
