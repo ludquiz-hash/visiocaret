@@ -15,6 +15,7 @@ const MainPage = mainPageKey ? Pages[mainPageKey] : () => null;
 const LoginPage = Pages['Login'];
 
 // Extract page components
+const AuthCallbackPage = Pages['AuthCallback'];
 const PricingPage = Pages['Pricing'];
 const PrivacyPage = Pages['Privacy'];
 const TermsPage = Pages['Terms'];
@@ -110,6 +111,7 @@ function App() {
             <Route path="/Privacy" element={<PrivacyPage />} />
             <Route path="/Terms" element={<TermsPage />} />
             <Route path="/Legal" element={<LegalPage />} />
+            <Route path="/auth/callback" element={<AuthCallbackPage />} />
 
             {/* Protected routes - require authentication */}
             <Route 

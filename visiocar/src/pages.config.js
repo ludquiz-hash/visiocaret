@@ -1,3 +1,4 @@
+import AuthCallback from './pages/AuthCallback';
 import Billing from './pages/Billing';
 import ClaimDetail from './pages/ClaimDetail';
 import ClaimWizard from './pages/ClaimWizard';
@@ -18,6 +19,7 @@ import Terms from './pages/Terms';
 import __Layout from './Layout.jsx';
 
 export const PAGES = {
+    "AuthCallback": AuthCallback,
     "Billing": Billing,
     "ClaimDetail": ClaimDetail,
     "ClaimWizard": ClaimWizard,

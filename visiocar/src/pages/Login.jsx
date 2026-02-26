@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
+import { supabase } from '@/lib/supabaseClient';
 import { Mail, ArrowRight, Loader2, Car, CheckCircle } from 'lucide-react';
 import GlassButton from '@/components/ui-custom/GlassButton';
 import GlassCard from '@/components/ui-custom/GlassCard';
@@ -10,24 +11,46 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
-  const { loginWithOtp } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email) return;
+    
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      toast.error('Veuillez entrer une adresse email');
+      return;
+    }
+
+    console.log('🔐 Tentative login avec:', trimmedEmail);
+    console.log('📍 URL actuelle:', window.location.origin);
+    console.log('🔗 Supabase URL:', import.meta.env.VITE_SUPABASE_URL);
 
     setIsLoading(true);
     try {
-      const result = await loginWithOtp(email);
-      if (result.success) {
-        setEmailSent(true);
-        toast.success('Lien de connexion envoyé ! Vérifiez votre email.');
-      } else {
-        toast.error(result.error || 'Erreur de connexion');
+      console.log('📤 Appel signInWithOtp...');
+      
+      const { data, error } = await supabase.auth.signInWithOtp({
+        email: trimmedEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+
+      console.log('📥 Réponse Supabase:', { data, error });
+
+      if (error) {
+        console.error('❌ Erreur Supabase:', error);
+        throw error;
       }
+
+      console.log('✅ Email envoyé avec succès');
+      setEmailSent(true);
+      toast.success('Lien de connexion envoyé ! Vérifiez votre email.');
+      
     } catch (error) {
-      toast.error('Erreur de connexion');
+      console.error('💥 Erreur complète:', error);
+      toast.error(error.message || 'Erreur lors de l\'envoi de l\'email');
     } finally {
       setIsLoading(false);
     }
@@ -50,8 +73,14 @@ export default function Login() {
             Un lien de connexion a été envoyé à <strong>{email}</strong>.<br />
             Cliquez sur le lien dans l'email pour accéder à votre compte.
           </p>
+          <div className="text-sm text-white/40 mb-4">
+            💡 Astuce : Vérifiez aussi votre dossier spam
+          </div>
           <button 
-            onClick={() => setEmailSent(false)}
+            onClick={() => {
+              setEmailSent(false);
+              setEmail('');
+            }}
             className="text-[#007AFF] hover:underline text-sm"
           >
             Utiliser une autre adresse email
@@ -91,6 +120,7 @@ export default function Login() {
                 placeholder="vous@exemple.com"
                 className="w-full pl-10 pr-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30 focus:outline-none focus:border-[#007AFF]/50"
                 required
+                disabled={isLoading}
               />
             </div>
           </div>
@@ -114,24 +144,15 @@ export default function Login() {
           </GlassButton>
         </form>
 
-        <div className="mt-6 text-center">
+        <div className="mt-6 text-center space-y-2">
           <p className="text-xs text-white/40">
             En vous connectant, vous acceptez nos{' '}
             <a href="/terms" className="text-[#007AFF] hover:underline">CGV</a>
             {' '}et{' '}
             <a href="/privacy" className="text-[#007AFF] hover:underline">Politique de confidentialité</a>.
           </p>
-        </div>
-
-        <div className="mt-8 pt-6 border-t border-white/[0.06]">
-          <p className="text-sm text-white/50 text-center">
-            Pas encore de compte ?{' '}
-            <button 
-              onClick={handleSubmit}
-              className="text-[#007AFF] hover:underline font-medium"
-            >
-              Inscrivez-vous
-            </button>
+          <p className="text-xs text-white/30">
+            URL: {window.location.origin}
           </p>
         </div>
       </GlassCard>
