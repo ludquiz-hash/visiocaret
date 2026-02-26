@@ -6,13 +6,9 @@ import { claimsApi, garageApi } from '@/api';
 import { useQuery } from '@tanstack/react-query';
 import { 
   FileText, 
-  Clock, 
-  TrendingUp, 
-  Zap,
   Plus,
   ArrowRight,
   Calendar,
-  CheckCircle2
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -28,33 +24,17 @@ export default function Dashboard() {
   const { user, profile } = useAuth();
 
   // Fetch garage
-  const { data: garage } = useQuery({
+  const { data: garage, isLoading: garageLoading } = useQuery({
     queryKey: ['garage'],
     queryFn: () => garageApi.get(),
     enabled: !!user,
   });
 
   // Fetch claims
-  const { data: claims } = useQuery({
+  const { data: claimsData = [], isLoading: claimsLoading } = useQuery({
     queryKey: ['claims'],
-    queryFn: () => claimsApi.list({ limit: 5 }),
+    queryFn: () => claimsApi.list({ limit: 50 }),
     enabled: !!user,
-  });
-
-  // Fetch claims
-  const { data: claims = [], isLoading: loading } = useQuery({
-    queryKey: ['claims', activeGarageId],
-    queryFn: async () => {
-      if (!activeGarageId) return [];
-      return await base44.entities.Claim.filter(
-        { garage_id: activeGarageId },
-        '-created_date',
-        50
-      );
-    },
-    enabled: !!activeGarageId,
-    refetchOnMount: true,
-    refetchOnWindowFocus: true,
   });
 
   // Fetch usage
@@ -64,31 +44,21 @@ export default function Dashboard() {
     enabled: !!user,
   });
 
-  const claimsList = claims || [];
+  const claimsList = claimsData || [];
+  const loading = claimsLoading || garageLoading;
 
   // Calculate stats
   const activeClaims = claimsList.filter(c => ['draft', 'analyzing', 'review'].includes(c.status));
   const completedClaims = claimsList.filter(c => c.status === 'completed');
-  const totalHoursSaved = completedClaims.reduce((acc, c) => {
-    const hours = c.ai_report?.total_hours || 0;
-    return acc + (hours * 0.3); // Assume 30% time saved per analysis
-  }, 0);
-
   const recentClaims = claimsList.slice(0, 5);
 
   return (
     <div className="space-y-8">
-      {process.env.NODE_ENV === 'development' && (
-        <div className="text-xs bg-white/5 text-white/50 px-3 py-2 rounded-lg border border-white/10">
-          🔍 DB claims count: {(claimsList || []).length} | activeGarageId: {activeGarageId || 'null'}
-        </div>
-      )}
-      
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-white">
-            Bonjour, {user?.full_name?.split(' ')[0] || 'Bienvenue'} 👋
+            Bonjour, {profile?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Bienvenue'} 👋
           </h1>
           <p className="text-white/50 mt-1">
             Voici un aperçu de votre activité
@@ -118,140 +88,79 @@ export default function Dashboard() {
           subtitle={garage?.plan_type === 'starter' ? `/ 15 max` : 'Illimité'}
         />
         <StatCard
-          title="Temps estimé gagné"
-          value={`${Math.round(totalHoursSaved)}h`}
-          icon={Clock}
-          color="green"
-          trend="up"
-          trendValue="+12%"
-        />
-        <StatCard
           title="Dossiers terminés"
           value={completedClaims.length}
-          icon={CheckCircle2}
+          icon={FileText}
+          color="green"
+        />
+        <StatCard
+          title="Total dossiers"
+          value={claimsList.length}
+          icon={FileText}
           color="orange"
-          subtitle="Total"
         />
       </div>
 
       {/* Recent Claims */}
-      <GlassCard className="overflow-hidden">
-        <div className="p-5 border-b border-white/[0.06] flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">Dossiers récents</h2>
-          <Link 
-            to={createPageUrl('Claims')}
-            className="text-sm text-[#007AFF] hover:text-[#007AFF]/80 flex items-center gap-1 transition-colors"
-          >
-            Voir tout
-            <ArrowRight className="w-4 h-4" />
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold text-white">Dossiers récents</h2>
+          <Link to={createPageUrl('Claims')}>
+            <GlassButton variant="ghost" size="sm">
+              Voir tout
+              <ArrowRight className="w-4 h-4" />
+            </GlassButton>
           </Link>
         </div>
 
         {loading ? (
-          <div className="p-5 space-y-4">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="flex items-center gap-4">
-                <Skeleton className="h-12 w-12 rounded-xl bg-white/5" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-48 bg-white/5" />
-                  <Skeleton className="h-3 w-32 bg-white/5" />
-                </div>
-                <Skeleton className="h-6 w-20 rounded-full bg-white/5" />
-              </div>
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <GlassCard key={i} className="p-4">
+                <Skeleton className="h-16" />
+              </GlassCard>
             ))}
           </div>
         ) : recentClaims.length === 0 ? (
           <EmptyState
             icon={FileText}
             title="Aucun dossier"
-            description="Créez votre premier dossier d'expertise pour commencer à utiliser l'analyse automatique."
-            action={() => window.location.href = createPageUrl('ClaimWizard')}
-            actionLabel="Créer un dossier"
+            description="Créez votre premier dossier d'expertise"
+            action={
+              <Link to={createPageUrl('ClaimWizard')}>
+                <GlassButton icon={Plus}>
+                  Créer un dossier
+                </GlassButton>
+              </Link>
+            }
           />
         ) : (
-          <div className="divide-y divide-white/[0.06]">
+          <div className="space-y-4">
             {recentClaims.map((claim) => (
-              <Link
-                key={claim.id}
-                to={createPageUrl(`ClaimDetail?id=${claim.id}`)}
-                className="flex items-center gap-4 p-4 hover:bg-white/[0.02] transition-colors"
-              >
-                {/* Vehicle Icon/Thumbnail */}
-                <div className="w-12 h-12 rounded-xl bg-[#007AFF]/10 flex items-center justify-center shrink-0">
-                  <span className="text-lg font-bold text-[#007AFF]">
-                    {claim.vehicle_data?.brand?.charAt(0) || 'V'}
-                  </span>
-                </div>
-
-                {/* Details */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium text-white truncate">
-                      {claim.vehicle_data?.brand || 'Véhicule'} {claim.vehicle_data?.model || ''}
+              <GlassCard key={claim.id} className="p-4 hover:border-white/[0.12] transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <h3 className="font-medium text-white truncate">
+                        {claim.claim_number || `Dossier #${claim.id?.slice(0, 8)}`}
+                      </h3>
+                      <StatusBadge status={claim.status} />
+                    </div>
+                    <p className="text-sm text-white/50">
+                      {claim.client_name || 'Client non renseigné'} • {claim.vehicle_brand || 'N/A'} {claim.vehicle_model || ''}
                     </p>
-                    {claim.reference && (
-                      <span className="text-xs text-white/40">#{claim.reference}</span>
-                    )}
                   </div>
-                  <div className="flex items-center gap-3 mt-1">
-                    <span className="text-sm text-white/50">
-                      {claim.client_data?.name || 'Client non défini'}
-                    </span>
-                    <span className="text-xs text-white/30">
-                      {format(new Date(claim.created_date), 'dd MMM yyyy', { locale: fr })}
-                    </span>
-                  </div>
+                  <p className="text-sm text-white/40 ml-4">
+                    {claim.created_at 
+                      ? format(new Date(claim.created_at), 'dd MMM', { locale: fr })
+                      : ''
+                    }
+                  </p>
                 </div>
-
-                {/* Status */}
-                <StatusBadge status={claim.status} />
-
-                <ArrowRight className="w-4 h-4 text-white/20" />
-              </Link>
+              </GlassCard>
             ))}
           </div>
         )}
-      </GlassCard>
-
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <GlassCard hover className="p-5">
-          <div className="flex items-start gap-4">
-            <div className="p-3 rounded-xl bg-[#007AFF]/10">
-              <Zap className="w-6 h-6 text-[#007AFF]" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-white mb-1">Analyse rapide</h3>
-              <p className="text-sm text-white/50 mb-4">
-                Téléchargez des photos et obtenez une analyse automatique en quelques secondes
-              </p>
-              <Link to={createPageUrl('ClaimWizard')}>
-                <GlassButton variant="secondary" size="sm">
-                  Démarrer
-                </GlassButton>
-              </Link>
-            </div>
-          </div>
-        </GlassCard>
-
-        <GlassCard hover className="p-5">
-          <div className="flex items-start gap-4">
-            <div className="p-3 rounded-xl bg-[#34C759]/10">
-              <TrendingUp className="w-6 h-6 text-[#34C759]" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-white mb-1">Statistiques avancées</h3>
-              <p className="text-sm text-white/50 mb-4">
-                Suivez vos performances et optimisez votre productivité
-              </p>
-              <Link to={createPageUrl('Claims')}>
-                <GlassButton variant="secondary" size="sm">
-                  Voir les rapports
-                </GlassButton>
-              </Link>
-            </div>
-          </div>
-        </GlassCard>
       </div>
     </div>
   );
