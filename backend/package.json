@@ -1,0 +1,34 @@
+{
+  "name": "visiocar-backend",
+  "version": "1.0.0",
+  "description": "Backend API for VisioCar - Expertise automobile",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "build": "echo 'Build complete'"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.3",
+    "express-rate-limit": "^7.2.0",
+    "helmet": "^7.1.0",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "moment": "^2.30.1",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "stripe": "^14.21.0",
+    "uuid": "^9.0.1",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
