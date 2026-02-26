@@ -4,10 +4,22 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+// Debug logs - TEMPORAIRE pour diagnostic
+console.log('🔍 [SupabaseClient] Initialisation...');
+console.log('🔍 [SupabaseClient] URL:', supabaseUrl || 'NON DÉFINIE');
+console.log('🔍 [SupabaseClient] Key existe:', !!supabaseAnonKey);
+console.log('🔍 [SupabaseClient] Key début:', supabaseAnonKey ? supabaseAnonKey.substring(0, 20) + '...' : 'N/A');
+console.log('🔍 [SupabaseClient] Key length:', supabaseAnonKey?.length || 0);
+
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('❌ Supabase environment variables missing!');
-  console.error('VITE_SUPABASE_URL:', supabaseUrl ? 'set' : 'missing');
-  console.error('VITE_SUPABASE_ANON_KEY:', supabaseAnonKey ? 'set' : 'missing');
+  console.error('❌ [SupabaseClient] Variables manquantes!');
+  console.error('❌ VITE_SUPABASE_URL:', supabaseUrl ? 'OK' : 'MANQUANT');
+  console.error('❌ VITE_SUPABASE_ANON_KEY:', supabaseAnonKey ? 'OK' : 'MANQUANT');
+}
+
+// Vérification format clé
+if (supabaseAnonKey && !supabaseAnonKey.startsWith('eyJ')) {
+  console.error('⚠️ [SupabaseClient] La clé ne commence pas par eyJ - ce n\'est probablement pas une clé JWT valide');
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -17,6 +29,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
   },
 });
+
+console.log('✅ [SupabaseClient] Client créé');
 
 // Auth helper functions
 export const authClient = {
@@ -44,12 +58,19 @@ export const authClient = {
   },
 
   async signInWithOtp(email) {
+    console.log('📤 [AuthClient] signInWithOtp appelé avec:', email);
+    console.log('📤 [AuthClient] URL:', supabaseUrl);
+    console.log('📤 [AuthClient] Key présente:', !!supabaseAnonKey);
+    
     const { data, error } = await supabase.auth.signInWithOtp({
       email,
       options: {
         emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     });
+    
+    console.log('📥 [AuthClient] Réponse:', { data, error: error?.message });
+    
     if (error) throw error;
     return data;
   },
