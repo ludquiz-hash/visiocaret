@@ -1,145 +1,172 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
-import { appParams } from '@/lib/app-params';
-import { createAxiosClient } from '@base44/sdk/dist/utils/axios-client';
+import { authClient, supabase } from '@/lib/supabaseClient';
 
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
-  const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(true);
   const [authError, setAuthError] = useState(null);
-  const [appPublicSettings, setAppPublicSettings] = useState(null); // Contains only { id, public_settings }
 
   useEffect(() => {
-    checkAppState();
-  }, []);
+    checkAuthState();
 
-  const checkAppState = async () => {
-    try {
-      setIsLoadingPublicSettings(true);
-      setAuthError(null);
-      
-      // First, check app public settings (with token if available)
-      // This will tell us if auth is required, user not registered, etc.
-      const appClient = createAxiosClient({
-        baseURL: `/api/apps/public`,
-        headers: {
-          'X-App-Id': appParams.appId
-        },
-        token: appParams.token, // Include token if available
-        interceptResponses: true
-      });
-      
-      try {
-        const publicSettings = await appClient.get(`/prod/public-settings/by-id/${appParams.appId}`);
-        setAppPublicSettings(publicSettings);
+    // Subscribe to auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth state changed:', event);
         
-        // If we got the app public settings successfully, check if user is authenticated
-        if (appParams.token) {
-          await checkUserAuth();
-        } else {
-          setIsLoadingAuth(false);
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          await loadUserData();
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setProfile(null);
           setIsAuthenticated(false);
         }
-        setIsLoadingPublicSettings(false);
-      } catch (appError) {
-        console.error('App state check failed:', appError);
-        
-        // Handle app-level errors
-        if (appError.status === 403 && appError.data?.extra_data?.reason) {
-          const reason = appError.data.extra_data.reason;
-          if (reason === 'auth_required') {
-            setAuthError({
-              type: 'auth_required',
-              message: 'Authentication required'
-            });
-          } else if (reason === 'user_not_registered') {
-            setAuthError({
-              type: 'user_not_registered',
-              message: 'User not registered for this app'
-            });
-          } else {
-            setAuthError({
-              type: reason,
-              message: appError.message
-            });
-          }
-        } else {
-          setAuthError({
-            type: 'unknown',
-            message: appError.message || 'Failed to load app'
-          });
-        }
-        setIsLoadingPublicSettings(false);
-        setIsLoadingAuth(false);
       }
-    } catch (error) {
-      console.error('Unexpected error:', error);
-      setAuthError({
-        type: 'unknown',
-        message: error.message || 'An unexpected error occurred'
-      });
-      setIsLoadingPublicSettings(false);
-      setIsLoadingAuth(false);
-    }
-  };
+    );
 
-  const checkUserAuth = async () => {
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, []);
+
+  const checkAuthState = async () => {
     try {
-      // Now check if the user is authenticated
       setIsLoadingAuth(true);
-      const currentUser = await base44.auth.me();
-      setUser(currentUser);
-      setIsAuthenticated(true);
-      setIsLoadingAuth(false);
-    } catch (error) {
-      console.error('User auth check failed:', error);
-      setIsLoadingAuth(false);
-      setIsAuthenticated(false);
+      setAuthError(null);
+
+      const session = await authClient.getSession();
       
-      // If user auth fails, it might be an expired token
-      if (error.status === 401 || error.status === 403) {
-        setAuthError({
-          type: 'auth_required',
-          message: 'Authentication required'
-        });
+      if (session) {
+        await loadUserData();
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+        setProfile(null);
       }
+    } catch (error) {
+      console.error('Auth check failed:', error);
+      setAuthError({
+        type: 'auth_error',
+        message: error.message || 'Authentication check failed'
+      });
+      setIsAuthenticated(false);
+    } finally {
+      setIsLoadingAuth(false);
     }
   };
 
-  const logout = (shouldRedirect = true) => {
-    setUser(null);
-    setIsAuthenticated(false);
-    
-    if (shouldRedirect) {
-      // Use the SDK's logout method which handles token cleanup and redirect
-      base44.auth.logout(window.location.href);
-    } else {
-      // Just remove the token without redirect
-      base44.auth.logout();
+  const loadUserData = async () => {
+    try {
+      const user = await authClient.getUser();
+      const profile = await authClient.getProfile();
+      
+      setUser(user);
+      setProfile(profile);
+      setIsAuthenticated(!!user);
+      setAuthError(null);
+    } catch (error) {
+      console.error('Load user data failed:', error);
+      setAuthError({
+        type: 'auth_error',
+        message: error.message
+      });
+    } finally {
+      setIsLoadingAuth(false);
     }
   };
 
-  const navigateToLogin = () => {
-    // Use the SDK's redirectToLogin method
-    base44.auth.redirectToLogin(window.location.href);
+  const login = async (email, password) => {
+    try {
+      setAuthError(null);
+      const { user } = await authClient.signInWithPassword(email, password);
+      await loadUserData();
+      return { success: true, user };
+    } catch (error) {
+      console.error('Login failed:', error);
+      setAuthError({
+        type: 'login_error',
+        message: error.message || 'Login failed'
+      });
+      return { success: false, error: error.message };
+    }
+  };
+
+  const loginWithOtp = async (email) => {
+    try {
+      setAuthError(null);
+      await authClient.signInWithOtp(email);
+      return { success: true };
+    } catch (error) {
+      console.error('OTP login failed:', error);
+      setAuthError({
+        type: 'login_error',
+        message: error.message || 'Failed to send login link'
+      });
+      return { success: false, error: error.message };
+    }
+  };
+
+  const loginWithOAuth = async (provider) => {
+    try {
+      setAuthError(null);
+      const { url } = await authClient.signInWithOAuth(provider);
+      return { success: true, url };
+    } catch (error) {
+      console.error('OAuth login failed:', error);
+      setAuthError({
+        type: 'login_error',
+        message: error.message || 'OAuth login failed'
+      });
+      return { success: false, error: error.message };
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await authClient.signOut();
+      setUser(null);
+      setProfile(null);
+      setIsAuthenticated(false);
+      setAuthError(null);
+      return { success: true };
+    } catch (error) {
+      console.error('Logout failed:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  const updateProfile = async (updates) => {
+    try {
+      const updated = await authClient.updateProfile(updates);
+      setProfile(updated);
+      return { success: true, data: updated };
+    } catch (error) {
+      console.error('Update profile failed:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
+  const value = {
+    user,
+    profile,
+    isAuthenticated,
+    isLoadingAuth,
+    authError,
+    login,
+    loginWithOtp,
+    loginWithOAuth,
+    logout,
+    updateProfile,
+    checkAuthState,
+    refreshUser: loadUserData,
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      isAuthenticated, 
-      isLoadingAuth,
-      isLoadingPublicSettings,
-      authError,
-      appPublicSettings,
-      logout,
-      navigateToLogin,
-      checkAppState
-    }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
@@ -152,3 +179,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+export default AuthContext;

@@ -1,239 +1,305 @@
-import { createClient } from '@supabase/supabase-js';
+// API Client - Replaces Base44 SDK with direct Supabase calls
+import { supabase } from '@/lib/supabaseClient';
 
-// Supabase client for auth only
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-});
-
-// Backend API URL
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-
-/**
- * Get current Supabase session
- */
-async function getSession() {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session;
+// Helper to get current user
+async function getCurrentUser() {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user;
 }
 
-/**
- * Generic API request helper
- */
-async function apiRequest(endpoint, options = {}) {
-  const session = await getSession();
-  
-  const headers = {
-    'Content-Type': 'application/json',
-    ...options.headers,
-  };
-
-  // Add auth token if available
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
-
-  try {
-    const response = await fetch(`${API_URL}${endpoint}`, {
-      ...options,
-      headers,
-    });
-
-    // Handle PDF responses
-    if (response.headers.get('content-type') === 'application/pdf') {
-      return { blob: await response.blob(), headers: response.headers };
-    }
-
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      const error = new Error(data?.error || 'Request failed');
-      error.status = response.status;
-      error.data = data;
-      throw error;
-    }
-
-    return data;
-  } catch (error) {
-    console.error(`[API] Error calling ${endpoint}:`, error);
-    throw error;
-  }
-}
-
-/**
- * Auth API
- */
+// Auth API
 export const authApi = {
-  async getMe() {
-    return apiRequest('/auth/me');
-  },
-
-  async updateProfile(updates) {
-    return apiRequest('/auth/profile', {
-      method: 'PATCH',
-      body: JSON.stringify(updates),
-    });
-  },
-
-  async signInWithOtp(email) {
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    if (error) return { success: false, error: error.message };
-    return { success: true };
-  },
-
-  async verifyOtp(email, token) {
-    const { data, error } = await supabase.auth.verifyOtp({
-      email,
-      token,
-      type: 'email',
-    });
-    if (error) return { success: false, error: error.message };
-    return { success: true, data };
-  },
-
-  async signOut() {
-    return supabase.auth.signOut();
-  },
-};
-
-/**
- * Claims API
- */
-export const claimsApi = {
-  async getClaims(params = {}) {
-    const query = new URLSearchParams(params).toString();
-    return apiRequest(`/claims${query ? `?${query}` : ''}`);
-  },
-
-  async getClaim(id) {
-    return apiRequest(`/claims/${id}`);
-  },
-
-  async createClaim(data) {
-    return apiRequest('/claims', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  },
-
-  async updateClaim(id, data) {
-    return apiRequest(`/claims/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  },
-
-  async deleteClaim(id) {
-    return apiRequest(`/claims/${id}`, {
-      method: 'DELETE',
-    });
-  },
-
-  async generatePDF(id) {
-    const response = await fetch(`${API_URL}/pdf/${id}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${(await getSession())?.access_token}`,
-      },
-    });
+  async me() {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
     
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'PDF generation failed' }));
-      throw new Error(error.error);
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') throw error;
+    
+    if (!data) {
+      // Create profile
+      const { data: newProfile, error: createError } = await supabase
+        .from('profiles')
+        .insert([{
+          id: user.id,
+          email: user.email,
+          full_name: user.user_metadata?.full_name || '',
+          created_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
+      
+      if (createError) throw createError;
+      return newProfile;
     }
     
-    const blob = await response.blob();
-    return { blob };
+    return data;
   },
 
-  async getClaimHistory(id) {
-    return apiRequest(`/claims/${id}/history`);
-  },
+  async updateMe(updates) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+    
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', user.id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  }
 };
 
-/**
- * Garage API
- */
+// Claims API
+export const claimsApi = {
+  async list(filters = {}) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+
+    let query = supabase
+      .from('claims')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (filters.status) {
+      query = query.eq('status', filters.status);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  },
+
+  async get(id) {
+    const { data, error } = await supabase
+      .from('claims')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  async create(data) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+
+    // Generate claim number
+    if (!data.claim_number) {
+      const date = new Date();
+      const prefix = 'VIS';
+      const random = Math.floor(1000 + Math.random() * 9000);
+      data.claim_number = `${prefix}-${date.getFullYear()}-${random}`;
+    }
+
+    const { data: result, error } = await supabase
+      .from('claims')
+      .insert([{
+        ...data,
+        user_id: user.id,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return result;
+  },
+
+  async update(id, data) {
+    const { data: result, error } = await supabase
+      .from('claims')
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return result;
+  },
+
+  async delete(id) {
+    const { error } = await supabase
+      .from('claims')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+    return true;
+  }
+};
+
+// Garage API
 export const garageApi = {
-  async getGarage() {
-    return apiRequest('/garage');
+  async get() {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+      .from('garages')
+      .select('*')
+      .eq('owner_id', user.id)
+      .single();
+    
+    if (error || !data) {
+      // Create default garage
+      const { data: newGarage, error: createError } = await supabase
+        .from('garages')
+        .insert([{
+          owner_id: user.id,
+          name: 'Mon Garage',
+          plan_type: 'starter',
+          is_subscribed: false,
+          trial_ends_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+          created_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
+      
+      if (createError) throw createError;
+      return newGarage;
+    }
+    
+    return data;
   },
 
-  async updateGarage(data) {
-    return apiRequest('/garage', {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  },
+  async update(data) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
 
-  async getMembers() {
-    return apiRequest('/garage/members');
-  },
-
-  async inviteMember(email, role) {
-    return apiRequest('/garage/members', {
-      method: 'POST',
-      body: JSON.stringify({ email, role }),
-    });
-  },
-
-  async updateMember(memberId, data) {
-    return apiRequest(`/garage/members/${memberId}`, {
-      method: 'PATCH',
-      body: JSON.stringify(data),
-    });
-  },
-
-  async removeMember(memberId) {
-    return apiRequest(`/garage/members/${memberId}`, {
-      method: 'DELETE',
-    });
-  },
-
-  async getUsage() {
-    return apiRequest('/garage/usage');
-  },
+    const { data: result, error } = await supabase
+      .from('garages')
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq('owner_id', user.id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return result;
+  }
 };
 
-/**
- * Stripe API
- */
-export const stripeApi = {
-  async createCheckoutSession(planId, garageId) {
-    return apiRequest('/stripe/checkout', {
-      method: 'POST',
-      body: JSON.stringify({ planId, garageId }),
-    });
+// Members API
+export const membersApi = {
+  async list() {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data: garage } = await supabase
+      .from('garages')
+      .select('id')
+      .eq('owner_id', user.id)
+      .single();
+
+    if (!garage) return [];
+
+    const { data, error } = await supabase
+      .from('members')
+      .select('*')
+      .eq('garage_id', garage.id);
+    
+    if (error) throw error;
+    return data || [];
   },
 
-  async createPortalSession() {
-    return apiRequest('/stripe/portal', {
-      method: 'POST',
-    });
+  async create(data) {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data: garage } = await supabase
+      .from('garages')
+      .select('id')
+      .eq('owner_id', user.id)
+      .single();
+
+    if (!garage) throw new Error('No garage found');
+
+    const { data: result, error } = await supabase
+      .from('members')
+      .insert([{
+        ...data,
+        garage_id: garage.id,
+        created_at: new Date().toISOString()
+      }])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return result;
   },
+
+  async update(id, data) {
+    const { data: result, error } = await supabase
+      .from('members')
+      .update({ ...data, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return result;
+  },
+
+  async delete(id) {
+    const { error } = await supabase
+      .from('members')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+    return true;
+  }
 };
 
-/**
- * Storage API (direct Supabase)
- */
+// Usage API
+export const usageApi = {
+  async get() {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const { count, error } = await supabase
+      .from('claims')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .gte('created_at', startOfMonth.toISOString());
+
+    if (error) throw error;
+
+    return {
+      claims_created: count || 0,
+      claims_limit: 15
+    };
+  }
+};
+
+// Storage API
 export const storageApi = {
-  async uploadFile(bucket, path, file) {
+  async upload(file, bucket = 'claim-photos') {
+    const user = await getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(path, file, {
+      .upload(fileName, file, {
         cacheControl: '3600',
-        upsert: false,
+        upsert: false
       });
 
     if (error) throw error;
@@ -242,15 +308,86 @@ export const storageApi = {
       .from(bucket)
       .getPublicUrl(data.path);
 
-    return publicUrl;
+    return { path: data.path, url: publicUrl };
   },
 
-  async deleteFile(bucket, path) {
+  async delete(path, bucket = 'claim-photos') {
     const { error } = await supabase.storage
       .from(bucket)
       .remove([path]);
 
     if (error) throw error;
     return true;
+  }
+};
+
+// Functions API (backend calls)
+export const functionsApi = {
+  async invoke(functionName, payload = {}) {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    const response = await fetch(`${import.meta.env.VITE_API_URL}/${functionName}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': session ? `Bearer ${session.access_token}` : ''
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Function call failed');
+    }
+
+    return response.json();
+  }
+};
+
+// Legacy compatibility - base44 adapter
+export const base44 = {
+  auth: {
+    me: () => authApi.me(),
+    updateMe: (data) => authApi.updateMe(data),
+    redirectToLogin: () => window.location.href = '/login',
+    logout: () => supabase.auth.signOut()
   },
+  entities: {
+    Claim: {
+      filter: (filters) => claimsApi.list(filters),
+      get: (id) => claimsApi.get(id),
+      create: (data) => claimsApi.create(data),
+      update: (id, data) => claimsApi.update(id, data),
+      delete: (id) => claimsApi.delete(id)
+    },
+    Garage: {
+      filter: () => garageApi.get().then(g => [g]),
+      update: (id, data) => garageApi.update(data)
+    },
+    GarageMember: {
+      filter: () => membersApi.list()
+    },
+    UsageCounter: {
+      filter: () => usageApi.get().then(u => [u])
+    }
+  },
+  functions: {
+    invoke: (name, payload) => functionsApi.invoke(name, payload)
+  },
+  integrations: {
+    Core: {
+      UploadFile: ({ file }) => storageApi.upload(file)
+    }
+  }
+};
+
+export default {
+  auth: authApi,
+  claims: claimsApi,
+  garage: garageApi,
+  members: membersApi,
+  usage: usageApi,
+  storage: storageApi,
+  functions: functionsApi,
+  base44 // Legacy compatibility
 };

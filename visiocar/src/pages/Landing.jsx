@@ -1,8 +1,7 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
-import { base44 } from '@/api/base44Client';
-import { useQuery } from '@tanstack/react-query';
+import { useAuth } from '@/lib/AuthContext';
 import { 
   Car, 
   Zap, 
@@ -13,16 +12,20 @@ import {
   ArrowRight,
   Sparkles,
   Play,
-  Star
+  Star,
+  Mail,
+  Loader2
 } from 'lucide-react';
 import GlassButton from '@/components/ui-custom/GlassButton';
 import GlassCard from '@/components/ui-custom/GlassCard';
 import { cn } from "@/lib/utils";
+import { toast } from 'sonner';
 
 const features = [
   {
+    icon: Zap,
     title: "Analyse automatique instantanée",
-  description: "Le système analyse vos photos et détecte automatiquement les dommages en quelques secondes.",
+    description: "Le système analyse vos photos et détecte automatiquement les dommages en quelques secondes.",
     color: "blue"
   },
   {
@@ -53,13 +56,34 @@ const steps = [
 ];
 
 export default function Landing() {
-  const { data: user } = useQuery({
-    queryKey: ['currentUser'],
-    queryFn: () => base44.auth.me(),
-    retry: false,
-  });
+  const { isAuthenticated, user, loginWithOtp } = useAuth();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [showLoginForm, setShowLoginForm] = useState(false);
 
-  const isLoggedIn = !!user;
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!email) return;
+    
+    setIsLoading(true);
+    try {
+      const result = await loginWithOtp(email);
+      if (result.success) {
+        toast.success('Lien de connexion envoyé ! Vérifiez votre email.');
+      } else {
+        toast.error(result.error || 'Erreur de connexion');
+      }
+    } catch (error) {
+      toast.error('Erreur de connexion');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const goToDashboard = () => {
+    navigate(createPageUrl('Dashboard'));
+  };
 
   return (
     <div className="min-h-screen bg-[#0B0E14] overflow-hidden">
@@ -76,26 +100,26 @@ export default function Landing() {
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#007AFF] to-[#0056CC] flex items-center justify-center">
               <Car className="w-5 h-5 text-white" />
             </div>
-            <span className="text-xl font-bold text-white">VisiWebCar</span>
+            <span className="text-xl font-bold text-white">VisioCar</span>
           </div>
           
           <div className="flex items-center gap-4">
-            {isLoggedIn ? (
-              <Link to={createPageUrl('Dashboard')}>
+            {isAuthenticated ? (
+              <button onClick={goToDashboard}>
                 <GlassButton>
                   Accéder à l'app
                   <ArrowRight className="w-4 h-4" />
                 </GlassButton>
-              </Link>
+              </button>
             ) : (
               <>
                 <button 
-                  onClick={() => base44.auth.redirectToLogin()}
+                  onClick={() => setShowLoginForm(true)}
                   className="text-white/70 hover:text-white transition-colors text-sm font-medium"
                 >
                   Connexion
                 </button>
-                <button onClick={() => base44.auth.redirectToLogin()}>
+                <button onClick={() => setShowLoginForm(true)}>
                   <GlassButton>
                     Essai gratuit
                   </GlassButton>
@@ -115,10 +139,10 @@ export default function Landing() {
           </div>
           
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-white mb-6 leading-tight">
-            L'expertise carrosserie
+            L'expertise automobile
             <br />
             <span className="bg-gradient-to-r from-[#007AFF] to-[#BF5AF2] bg-clip-text text-transparent">
-              propulsée par l’analyse avancée
+              propulsée par l'IA
             </span>
           </h1>
           
@@ -126,22 +150,64 @@ export default function Landing() {
             Analysez les dommages, estimez les réparations et générez des rapports PDF professionnels en quelques clics.
           </p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <button onClick={() => base44.auth.redirectToLogin()}>
-              <GlassButton size="lg">
-                Commencer gratuitement
-                <ArrowRight className="w-5 h-5" />
-              </GlassButton>
-            </button>
-            <Link to={createPageUrl('Pricing')}>
-              <GlassButton variant="secondary" size="lg">
-                Voir les tarifs
-              </GlassButton>
-            </Link>
-          </div>
+          {/* Login Form */}
+          {showLoginForm && !isAuthenticated ? (
+            <div className="max-w-md mx-auto mb-10">
+              <GlassCard className="p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Connexion sécurisée</h3>
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="votre@email.com"
+                      className="w-full pl-10 pr-4 py-3 bg-white/[0.04] border border-white/[0.08] rounded-xl text-white placeholder:text-white/30 focus:outline-none focus:border-[#007AFF]/50"
+                      required
+                    />
+                  </div>
+                  <GlassButton 
+                    type="submit" 
+                    className="w-full"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Envoi...
+                      </>
+                    ) : (
+                      <>
+                        Recevoir le lien magique
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </GlassButton>
+                </form>
+                <p className="text-xs text-white/40 mt-4">
+                  Un email avec un lien de connexion vous sera envoyé.
+                </p>
+              </GlassCard>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button onClick={() => isAuthenticated ? goToDashboard() : setShowLoginForm(true)}>
+                <GlassButton size="lg">
+                  {isAuthenticated ? 'Accéder au tableau de bord' : 'Commencer gratuitement'}
+                  <ArrowRight className="w-5 h-5" />
+                </GlassButton>
+              </button>
+              <Link to={createPageUrl('Pricing')}>
+                <GlassButton variant="secondary" size="lg">
+                  Voir les tarifs
+                </GlassButton>
+              </Link>
+            </div>
+          )}
 
           <p className="text-sm text-white/40 mt-6">
-            5 jours d'essai gratuit • Sans carte bancaire
+            14 jours d'essai gratuit • Sans carte bancaire
           </p>
         </div>
       </section>
@@ -154,7 +220,7 @@ export default function Landing() {
               Tout ce dont vous avez besoin
             </h2>
             <p className="text-white/50 max-w-xl mx-auto">
-              Une solution complète pour digitaliser vos expertises carrosserie
+              Une solution complète pour digitaliser vos expertises automobile
             </p>
           </div>
 
@@ -219,11 +285,11 @@ export default function Landing() {
               Prêt à transformer vos expertises ?
             </h2>
             <p className="text-white/60 mb-8 max-w-xl mx-auto">
-              Rejoignez les carrossiers qui gagnent du temps chaque jour avec VisiWebCar.
+              Rejoignez les experts qui gagnent du temps chaque jour avec VisioCar.
             </p>
-            <button onClick={() => base44.auth.redirectToLogin()}>
+            <button onClick={() => isAuthenticated ? goToDashboard() : setShowLoginForm(true)}>
               <GlassButton size="lg">
-                Démarrer l'essai gratuit
+                {isAuthenticated ? 'Accéder à l\'app' : 'Démarrer l\'essai gratuit'}
                 <ArrowRight className="w-5 h-5" />
               </GlassButton>
             </button>
@@ -239,7 +305,7 @@ export default function Landing() {
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#007AFF] to-[#0056CC] flex items-center justify-center">
                 <Car className="w-4 h-4 text-white" />
               </div>
-              <span className="font-semibold text-white">VisiWebCar</span>
+              <span className="font-semibold text-white">VisioCar</span>
             </div>
             
             <div className="flex items-center gap-6 text-sm text-white/50">
@@ -255,7 +321,7 @@ export default function Landing() {
             </div>
 
             <p className="text-sm text-white/40">
-              © 2024 VisiWebCar. Tous droits réservés.
+              © 2024 VisioCar. Tous droits réservés.
             </p>
           </div>
         </div>
